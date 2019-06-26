@@ -6,7 +6,8 @@ SIZE = WIDTH, HEIGHT = 1000, 700
 BG_COLOR = pygame.Color ('grey')
 FPS = 45
 SPRITE_IMAGES = 10
-WALK_SPEED = 3
+WALK_SPEED = 4
+ZOMBIE_SPEED = 1
 RUN_SPEED = 10
 
 def printRect (log_str, rect):
@@ -27,7 +28,7 @@ class State (IntEnum):
     DEAD = 4
 
 class PlayerSprite (pygame.sprite.Sprite):
-    def __init__ (self, platform_group, spike_group, screen_rect):
+    def __init__ (self, pos, platform_group, spike_group, zombie_group, screen_rect):
         super (PlayerSprite, self).__init__ ()
         self.dead_w             = int (75*986/579)
         self.dead_h             = int (100*796/763)
@@ -41,11 +42,11 @@ class PlayerSprite (pygame.sprite.Sprite):
         self.images[State.JUMP] = []
         self.images[State.DEAD] = []
         for i in range (1, 11):
-            img_path_i = "images/idle" + str (i) + ".png"
-            img_path_w = "images/walk" + str (i) + ".png"
-            img_path_j = "images/jump" + str (i) + ".png"
-            img_path_d = "images/dead"  + str (i) + ".png"
-            img_path_r = "images/run"  + str (i) + ".png"
+            img_path_i = "images/player/idle" + str (i) + ".png"
+            img_path_w = "images/player/walk" + str (i) + ".png"
+            img_path_j = "images/player/jump" + str (i) + ".png"
+            img_path_d = "images/player/dead"  + str (i) + ".png"
+            img_path_r = "images/player/run"  + str (i) + ".png"
             self.images[State.IDLE].append (pygame.transform.scale (pygame.image.load (img_path_i), (self.alive_w, self.alive_h)))
             self.images[State.WALK].append (pygame.transform.scale (pygame.image.load (img_path_w), (self.alive_w, self.alive_h)))
             self.images[State.RUN].append (pygame.transform.scale (pygame.image.load (img_path_r), (self.alive_w, self.alive_h)))
@@ -53,6 +54,7 @@ class PlayerSprite (pygame.sprite.Sprite):
             self.images[State.DEAD].append (pygame.transform.scale (pygame.image.load (img_path_d), (self.dead_w, self.dead_h)))
 
         self.screen_rect = screen_rect
+        self.zombie_group = zombie_group
         self.platform_group = platform_group
         self.spike_group = spike_group
         self.index = 0.0
@@ -66,11 +68,11 @@ class PlayerSprite (pygame.sprite.Sprite):
         self.velocity           = 0     # Velocity for each tick
         self.acceleration       = 1     # Acceleration due to gravity
         self.gravity_acc        = 1
-        self.total_jump_height  = 300
+        self.total_jump_height  = 150
         self.unit_time          = 1
         self.up_time            = int (math.sqrt (self.total_jump_height * 2 / self.acceleration))
-        self.x = self.init_x    = 100
-        self.y = self.init_y    = 350
+        self.x = self.init_x    = pos[0]
+        self.y = self.init_y    = pos[1]
         self.w = self.init_w    = self.alive_w
         self.h = self.init_h    = self.alive_h
         #self.player_rect        = pygame.Rect (self.x + 20, self.y + 20, self.w - 20, self.h - 20)
@@ -126,8 +128,11 @@ class PlayerSprite (pygame.sprite.Sprite):
     def get_collision (self):
         min_y = self.rect.bottom
         #printRect ("Before collision player rect:", self.rect)
-        for spike_sprite in pygame.sprite.spritecollide (self, self.spike_group, False):
+        for spike_sprite in pygame.sprite.spritecollide (self, self.spike_group, False, pygame.sprite.collide_rect_ratio(0.75)):
             self.rect.bottom = spike_sprite.rect.top
+            self.dead ()
+
+        for zombie_sprite in pygame.sprite.spritecollide (self, self.zombie_group, False, pygame.sprite.collide_rect_ratio(0.65)):
             self.dead ()
 
         for collided_sprite in pygame.sprite.spritecollide (self, self.platform_group, False):
@@ -216,6 +221,43 @@ class PlayerSprite (pygame.sprite.Sprite):
                 #self.dead ()
             #print (str (self.rect.y) + " "  + str (min_y))
 
+class ZombieSprite (pygame.sprite.Sprite):
+    def __init__ (self, bound_rect):
+        super (ZombieSprite, self).__init__ ()
+
+        self.w = 75
+        self.h = 100
+        self.images = []
+        for i in range (1, 11):
+            img_path = "images/zombie/walk" + str (i) + ".png"
+            self.images.append (pygame.transform.scale (pygame.image.load (img_path), (self.w, self.h)))
+
+        self.direction = Direction.RIGHT
+        self.bound_rect = bound_rect
+        self.index = 0.0
+        self.image = self.images[int (self.index)]
+        self.rect = self.image.get_rect ()
+        self.rect.left      = bound_rect.left
+        self.rect.bottom    = bound_rect.bottom
+
+    def update (self):
+        self.index += 0.25
+        if self.index >= len (self.images):
+            self.index = 0
+
+        if self.rect.right >= self.bound_rect.right:
+            self.direction = Direction.LEFT
+        if self.rect.left <= self.bound_rect.left:
+            self.direction = Direction.RIGHT
+
+        if self.direction == Direction.RIGHT:
+            self.rect.x += ZOMBIE_SPEED
+            self.image = self.images[int (self.index)]
+        else:
+            self.rect.x -= ZOMBIE_SPEED
+            self.image = pygame.transform.flip (self.images[int (self.index)], int (self.rect.w / 2), 0)
+
+
 class PlatformSprite (pygame.sprite.Sprite):
     def __init__ (self, rect, color):
         super (PlatformSprite, self).__init__ ()
@@ -246,8 +288,10 @@ def main ():
     spike  = SpikeSprite (pygame.Rect (0, 650, WIDTH, 50), "red")
     platforms = pygame.sprite.Group (ground1, ground2, ground3)
     spikes  = pygame.sprite.Group (spike)
-    player = PlayerSprite (platforms, spikes, screen_rect)
-    actors = pygame.sprite.Group (player)
+    zombie = ZombieSprite (pygame.Rect (0, 470, 300, 30))
+    zombies = pygame.sprite.Group (zombie)
+    player = PlayerSprite ((100, 200), platforms, spikes, zombies, screen_rect)
+    actors = pygame.sprite.Group (player, zombie)
 
     clock = pygame.time.Clock ()
 
